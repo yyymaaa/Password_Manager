@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Password Manager</title>
+    
+    <!--CSS STYLING-->
+    
+    <script src="bundle.js" defer></script>
+</head>
+<body>
+    <main>
+        <h1>🔐 My Password Manager</h1>
+        
+        <div id="login-section" class="card">
+            <label for="master-password">Master Password:</label>
+            <input type="password" id="master-password" placeholder="Enter your master password">
+            <div class="button-group">
+                <button id="btn-init">Initialize New Keychain</button>
+                <button id="btn-load">Load from Browser</button>
+            </div>
+        </div>
+
+        <div id="keychain-app" class="card hidden">
+            <h2>Keychain Unlocked</h2>
+            
+            <div class="form-group">
+                <label for="service-name">Service (e.g., google.com):</label>
+                <input type="text" id="service-name" placeholder="Service domain">
+            </div>
+            
+            <div class="form-group">
+                <label for="service-password">Password:</label>
+                <input type="text" id="service-password" placeholder="Password to save/retrieve">
+            </div>
+
+            <div class="button-group">
+                <button id="btn-get">Get</button>
+                <button id="btn-set">Set</button>
+                <button id="btn-remove">Remove</button>
+            </div>
+
+            <button id="btn-save" class="btn-save">Save Keychain to Browser</button>
+        </div>
+
+        <div id="message-area" class="message"></div>
+    </main>
+</body>
+</html>
