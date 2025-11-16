@@ -144,6 +144,108 @@ class Keychain {
     * ...
     */
   static async load(password, repr, trustedDataCheck) {
+    // check thee tamper-proof seal
+    if (trustedDataCheck !== undefined) {
+      // First, we re-create the hash from the 'repr' (contents)
+      const hashBuffer = await subtle.digest("SHA-256", stringToBuffer(repr));
+      const localChecksum = encodeBuffer(hashBuffer);
+
+
+      // Now, we check if our new hash matches the "trusted" one.
+      if (localChecksum !== trustedDataCheck) {
+        // If not, someone messed with the file!
+        throw new Error("Integrity check failed! Data has been tampered with.");
+      }
+    }
+
+
+    // open the locked safe file
+    const data = JSON.parse(repr);
+
+
+    // recreate the keys
+    const salt = decodeBuffer(data.salt);
+
+
+    const masterKeyMaterial = await subtle.importKey(
+      "raw",
+      stringToBuffer(password),
+      "PBKDF2",
+      false,
+      ["deriveKey"]
+    );
+
+
+    const masterKey = await subtle.deriveKey(
+      {
+        name: "PBKDF2",
+        salt: salt,
+        iterations: PBKDF2_ITERATIONS,
+        hash: "SHA-256",
+      },
+      masterKeyMaterial,
+      { name: "HMAC", hash: "SHA-256", length: 256 },
+      true,
+      ["sign"]
+    );
+
+
+    // [FIX: We do the same fix here in load too]
+    // [FIX: These are the raw ingredients (ArrayBuffers)]
+    const hmacKeyMaterial = await subtle.sign(
+      "HMAC",
+      masterKey,
+      stringToBuffer("hmac-key")
+    );
+    const aesKeyMaterial = await subtle.sign(
+      "HMAC",
+      masterKey,
+      stringToBuffer("aes-key")
+    );
+
+
+    // [FIX: "PACKAGE" THEM INTO OFFICIAL TOOLS (CryptoKeys)]
+    const hmacKey = await subtle.importKey(
+      "raw",
+      hmacKeyMaterial,
+      { name: "HMAC", hash: "SHA-256" },
+      true,
+      ["sign"]
+    );
+    const aesKey = await subtle.importKey(
+      "raw",
+      aesKeyMaterial,
+      "AES-GCM",
+      true,
+      ["encrypt", "decrypt"]
+    );
+
+
+    // check the password
+    const localPasswordCheck = await subtle.sign(
+      "HMAC",
+      masterKey,
+      stringToBuffer("password-check")
+    );
+
+
+    // Compare our new password to the saved password
+    if (encodeBuffer(localPasswordCheck) !== data.passwordCheck) {
+      // If they don't match, the user gave the WRONG PASSWORD.
+      throw new Error("Invalid password!");
+    }
+
+
+    //success, now we build the safe
+    const secrets = {
+      // [FIX: Storing the packaged tools (CryptoKeys)]
+      hmacKey: hmacKey,
+      aesKey: aesKey
+    };
+
+
+    // ...and build the new safe, passing in the data we loaded which already contains the kvs) and our new secrets.
+    return new Keychain(data, secrets);
    
   };
 
@@ -151,6 +253,21 @@ class Keychain {
     * Returns a JSON serialization of the contents of the keychain...
     */ 
   async dump() {
+    // package up the public data
+    const contents = JSON.stringify(this.data);
+
+
+    //create a tamper-proof seal
+    const hashBuffer = await subtle.digest("SHA-256", stringToBuffer(contents));
+
+
+    //get the final checksum
+    const checksum = encodeBuffer(hashBuffer);
+
+
+    // return both pieces
+     return [contents, checksum];
+
 
   };
 
@@ -158,6 +275,55 @@ class Keychain {
     * Fetches the data (as a string) corresponding to the given domain...
     */
   async get(name) {
+    // create the secret label
+    const hmacBuffer = await subtle.sign(
+      "HMAC",
+      this.secrets.hmacKey,
+      stringToBuffer(name)
+    );
+    const kvsKey = encodeBuffer(hmacBuffer);
+
+
+    // find data
+    const entry = this.data.kvs[kvsKey];
+
+
+    // check if it exists
+    if (!entry) {
+      return null;
+  _ }
+
+
+    // get the scrambled data
+    const ciphertext = decodeBuffer(entry.ciphertext);
+    const iv = decodeBuffer(entry.iv);
+
+
+    //unscramble the data
+    let decryptedBuffer;
+    try {
+      // We try to decrypt.
+      decryptedBuffer = await subtle.decrypt(
+        {
+          name: "AES-GCM",
+          iv: iv,
+          additionalData: hmacBuffer
+        },
+        this.secrets.aesKey, // Use our "Scrambler Key"
+        ciphertext
+      );
+    } catch (e) {
+      // If the `decrypt` fails, it means a thief messed with our safe (or the data is corrupt). We throw an error.
+      throw new Error("Tampering detected! Decryption failed.");
+    }
+
+
+    // clean the password
+    const paddedPassword = bufferToString(decryptedBuffer);
+
+
+    // return the full password
+    return unpad(paddedPassword);
 
   };
 
