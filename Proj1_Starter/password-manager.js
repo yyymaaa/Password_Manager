@@ -330,7 +330,43 @@ class Keychain {
   /**   * Inserts the domain and associated data into the KVS...
   */
   async set(name, value) {
+    //create the secret label
+    const hmacBuffer = await subtle.sign(
+    "HMAC",
+      this.secrets.hmacKey,
+      stringToBuffer(name)
+    );
 
+
+    //turn the buffer into a simple text string
+    const kvsKey = encodeBuffer(hmacBuffer);
+
+
+    //hide password length
+    const paddedPassword = pad(value);
+
+
+    //scramble the password
+    const iv = getRandomBytes(12);
+
+
+  //now we encrypt
+    const ciphertext = await subtle.encrypt(
+      {
+        name: "AES-GCM",
+         iv: iv,
+        additionalData: hmacBuffer
+      },
+      this.secrets.aesKey, //using our "Scrambler Key"
+      stringToBuffer(paddedPassword) //encrypting the padded password
+    );
+
+
+    //store the scrambled data
+    this.data.kvs[kvsKey] = {
+      iv: encodeBuffer(iv),
+      ciphertext: encodeBuffer(ciphertext)
+    };
   };
 
   /**
@@ -338,8 +374,26 @@ m   * Removes the record with name from the password manager...
     */
 
   async remove(name) {
+    const hmacBuffer = await subtle.sign(
+      "HMAC",
+      this.secrets.hmacKey,
+      stringToBuffer(name)
+    );
+    const kvsKey = encodeBuffer(hmacBuffer);
 
-};
+
+    // check if data exists
+    if (this.data.kvs.hasOwnProperty(kvsKey)) {
+      // if it exists, we delete it
+      delete this.data.kvs[kvsKey];
+    // Return `true` to show it worked.
+      return true;
+    } else {
+      // if it doesnt exist, we cannot delete anything, so we just return false
+      return false;
+    }
+  }
+}
 
 module.exports = { Keychain };
 
